@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HTML to Data URL Converter</title>
+</head>
+<body>
+    <textarea id="htmlInput" rows="10" cols="30"></textarea>
+    <button onclick="convertToDataURL()">Convert</button>
+    <p id="dataURL"></p>
+
+    <script>
+        function convertToDataURL() {
+            const htmlContent = document.getElementById('htmlInput').value;
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            const reader = new FileReader();
+            reader.onloadend = function() {
+                document.getElementById('dataURL').textContent = reader.result;
+            };
+            reader.readAsDataURL(blob);
+        }
+    </script>
+</body>
+</html>
