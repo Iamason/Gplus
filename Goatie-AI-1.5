@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Model Chat (Image Support)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Styles unchanged */
+        #chat-box::-webkit-scrollbar { width: 8px; }
+        #chat-box::-webkit-scrollbar-track { background: #2d3748; }
+        #chat-box::-webkit-scrollbar-thumb { background-color: #4a5568; border-radius: 4px; border: 2px solid #2d3748; }
+        #image-input { display: none; }
+        #image-preview-container { max-height: 100px; }
+        #image-preview { max-width: 100%; max-height: 90px; object-fit: contain; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white h-screen flex flex-col justify-center items-center p-4 font-sans">
+
+    <!-- API Key & Model Selection -->
+    <div class="w-full max-w-2xl bg-gray-800 p-4 rounded-lg mb-4 shadow-lg">
+        <label for="api-key" class="block text-sm font-medium mb-2 text-gray-300">API Key:</label>
+        <input type="password" id="api-key" class="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter your OpenRouter API key">
+
+        <label for="model" class="block text-sm font-medium mt-3 mb-2 text-gray-300">Select Model:</label>
+        <select id="model" class="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <!-- === Specific DeepSeek Model (Confirmed by User) === -->
+            <option value="deepseek/deepseek-chat-v3-0324:free">DeepSeek Chat v3 (Free - 03/24)</option>
+
+            <!-- === Other Models (From User's List) === -->
+            <!-- IMPORTANT: Verify vision capability for Gemini Exp on OpenRouter! -->
+            <option value="google/gemini-2.5-pro-exp-03-25:free" data-vision="true">Google Gemini 2.5 Pro Exp (Free, Vision?)</option>
+            <option value="mistralai/mistral-small-3.1-24b-instruct:free">Mistral Small 3.1 Instruct (Free)</option>
+            <option value="allenai/molmo-7b-d:free">AllenAI MolMo 7B (Free)</option>
+            <option value="featherless/qwerky-72b:free">Featherless Qwerky 72B (Free)</option>
+            <option value="open-r1/olympiccoder-7b:free">Open-R1 Olympic Coder 7B (Free)</option>
+            <option value="google/gemma-3-1b-it:free">Google Gemma 3 1B IT (Free)</option>
+            <!-- Add other models here, adding data-vision="true" if they support images -->
+
+        </select>
+         <p class="text-xs text-gray-500 mt-1">Verify vision capability (`data-vision="true"`) for selected models on OpenRouter.</p>
+    </div>
+
+    <!-- Chat Interface (Unchanged) -->
+    <div class="w-full max-w-2xl bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col" style="height: 70vh;">
+        <div id="chat-box" class="flex-grow overflow-y-auto p-4 border border-gray-700 rounded mb-4 bg-gray-900 space-y-4">
+            <div class="text-center text-sm text-gray-500">Enter API Key, select model, type message, optionally attach image.</div>
+        </div>
+        <div id="image-preview-container" class="mb-2 relative hidden bg-gray-700 p-1 rounded">
+             <img id="image-preview" src="#" alt="Image preview"/>
+             <button onclick="clearImageSelection()" class="absolute top-0 right-0 bg-red-600 hover:bg-red-700 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold" title="Remove Image">×</button>
+        </div>
+        <div class="flex mt-auto items-end">
+             <input type="file" id="image-input" accept="image/*" onchange="handleImageSelection(event)">
+            <button onclick="document.getElementById('image-input').click()" class="p-2 mr-2 bg-gray-600 hover:bg-gray-500 rounded text-white" title="Attach Image">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            </button>
+            <input type="text" id="message-input" class="flex-1 p-2 rounded-l bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400" placeholder="Type your message..." onkeydown="handleKeyDown(event)">
+            <button id="send-button" onclick="sendMessage()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-r text-white font-semibold transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+                Send
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- JavaScript (Unchanged from previous version with image support + debugging) ---
+        const API_URL = "https://openrouter.ai/api/v1/chat/completions";
+        let conversationHistory = [];
+        let isSending = false;
+        let selectedImageDataUrl = null;
+        const chatBox = document.getElementById("chat-box");
+        const messageInput = document.getElementById("message-input");
+        const apiKeyInput = document.getElementById("api-key");
+        const modelSelect = document.getElementById("model");
+        const sendButton = document.getElementById("send-button");
+        const imageInput = document.getElementById("image-input");
+        const imagePreviewContainer = document.getElementById("image-preview-container");
+        const imagePreview = document.getElementById("image-preview");
+
+        function handleImageSelection(event) {
+             const file = event.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onloadend = function() { selectedImageDataUrl = reader.result; imagePreview.src = selectedImageDataUrl; imagePreviewContainer.classList.remove('hidden'); }
+                reader.onerror = function(error) { console.error("Error reading file:", error); addMessageToChat("System", "⚠️ Error reading image file.", "text-red-400 font-semibold"); clearImageSelection(); };
+                reader.readAsDataURL(file);
+            } else { clearImageSelection(); if (file) { addMessageToChat("System", "⚠️ Please select a valid image file.", "text-yellow-400 font-semibold"); } }
+        }
+        function clearImageSelection() { selectedImageDataUrl = null; imageInput.value = null; imagePreview.src = '#'; imagePreviewContainer.classList.add('hidden'); }
+
+        async function sendMessage() {
+            if (isSending) return;
+
+            const apiKey = apiKeyInput.value.trim();
+            const selectedOptionElement = modelSelect.options[modelSelect.selectedIndex];
+            const model = selectedOptionElement.value;
+            const isVisionModel = selectedOptionElement.dataset.vision === 'true'; // Check vision flag
+            const userMessageText = messageInput.value.trim();
+            const userImage = selectedImageDataUrl;
+
+            // Validation
+            if (!model) { addMessageToChat("System", `⚠️ No model selected.`, "text-red-400 font-semibold"); return; }
+            if (!apiKey) { addMessageToChat("System", "⚠️ Please enter API key.", "text-yellow-400 font-semibold"); apiKeyInput.focus(); return; }
+            if (!userMessageText && !userImage) { addMessageToChat("System", "⚠️ Please type a message or attach an image.", "text-yellow-400 font-semibold"); messageInput.focus(); return; }
+            if (userImage && !isVisionModel) { addMessageToChat("System", `⚠️ Model '${model}' may not support images (check data-vision='true' in HTML & on OpenRouter). Remove image or select vision model.`, "text-yellow-400 font-semibold"); return; }
+
+            isSending = true;
+            messageInput.disabled = true;
+            sendButton.disabled = true;
+
+            let userMessagePayload = { role: "user", content: null };
+            let contentParts = [];
+            let imageSentIndicator = false;
+            let payloadType = "Text Only";
+
+            if (userMessageText) { contentParts.push({ type: "text", text: userMessageText }); }
+
+            if (userImage && isVisionModel) {
+                 if (!userMessageText) { contentParts.push({ type: "text", text: "Describe this image." }); } // Default prompt if only image
+                 contentParts.push({ type: "image_url", image_url: { url: userImage } });
+                 imageSentIndicator = true;
+                 payloadType = "Multimodal";
+            }
+
+            if (contentParts.length > 1) { userMessagePayload.content = contentParts; }
+            else if (contentParts.length === 1 && contentParts[0].type === 'text') { userMessagePayload.content = contentParts[0].text; payloadType = "Text Only"; }
+            else { addMessageToChat("System", "⚠️ Error: Could not construct message payload.", "text-red-400 font-semibold"); isSending = false; messageInput.disabled = false; sendButton.disabled = false; return; }
+
+            // Add debugging message
+             addMessageToChat("System", `Debug: Sending ${payloadType} payload to ${model}.`, "text-gray-500 text-xs");
+
+            // Add user message to UI (using original text for display)
+            addMessageToChat("You", userMessageText || (imageSentIndicator ? "(Image Sent)" : "Error"), "text-blue-300 text-right", null, imageSentIndicator);
+            conversationHistory.push(userMessagePayload); // Add structured payload
+
+            messageInput.value = ""; // Clear text input
+            clearImageSelection(); // Clear image preview AFTER use
+
+            const loadingIndicatorId = `loading-${Date.now()}`;
+            addMessageToChat("Bot", "<span>Thinking...</span>", "text-gray-400 italic", loadingIndicatorId);
+            scrollToBottom();
+
+            try {
+                const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}`, "HTTP-Referer": `${location.protocol}//${location.host}`, "X-Title": "Simple Multi-Model Chat UI" };
+                const body = JSON.stringify({ model: model, messages: conversationHistory, temperature: 0.7 });
+                console.log("Sending API Request Body:", body.substring(0, 500) + (body.length > 500 ? "..." : "")); // Truncated log
+
+                const response = await fetch(API_URL, { method: "POST", headers: headers, body: body });
+                removeElementById(loadingIndicatorId);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const errorMsg = data?.error?.message || `HTTP Error: ${response.status} ${response.statusText}`;
+                    addMessageToChat("System", `⚠️ API Error with model '${model}': ${errorMsg} (Status: ${response.status})`, "text-red-400 font-semibold");
+                    console.error(`API Error Response (${model}):`, data);
+                    conversationHistory.pop();
+                } else if (data.choices && data.choices.length > 0 && data.choices[0].message) {
+                     let botReplyContent = data.choices[0].message.content;
+                    let botReply = "";
+                    if (typeof botReplyContent === 'string') { botReply = botReplyContent.trim(); }
+                    else if (Array.isArray(botReplyContent)) { botReply = botReplyContent.map(part => part.text || '').join(' ').trim(); console.warn("Bot returned array content:", botReplyContent); }
+                    botReply = botReply || "🤖 Received empty or non-text content.";
+                    addMessageToChat("Bot", botReply, "text-green-300");
+                    conversationHistory.push({ role: "assistant", content: botReply });
+                } else {
+                    addMessageToChat("System", `⚠️ Unexpected response format from model '${model}'. Check console.`, "text-red-400 font-semibold");
+                    console.error(`Unexpected API Response (${model}):`, data);
+                    conversationHistory.pop();
+                }
+            } catch (error) {
+                console.error(`❌ Network/Fetch Error (${model}):`, error);
+                removeElementById(loadingIndicatorId);
+                addMessageToChat("System", `⚠️ Network error calling model '${model}': ${error.message}`, "text-red-400 font-semibold");
+                conversationHistory.pop();
+            } finally {
+                isSending = false;
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                messageInput.focus();
+                scrollToBottom();
+            }
+        }
+
+        // --- Helper Functions (Unchanged addMessageToChat, etc.) ---
+        function addMessageToChat(sender, message, cssClass, elementId = null, imageSent = false) {
+             const messageDiv = document.createElement("div");
+            if (elementId) { messageDiv.id = elementId; }
+            messageDiv.classList.add("p-2", "rounded-lg", "max-w-[85%]");
+            if (sender === "You") { messageDiv.classList.add("bg-blue-900", "self-end", "ml-auto"); }
+            else if (sender === "Bot") { messageDiv.classList.add("bg-gray-700", "self-start", "mr-auto"); }
+            else { messageDiv.classList.add("bg-gray-600", "self-center", "text-center", "text-xs", "italic", "w-full", "max-w-full"); }
+            if (cssClass) { messageDiv.classList.add(...cssClass.split(" ")); }
+            const contentContainer = document.createElement('div');
+            const senderSpan = document.createElement('strong');
+            senderSpan.classList.add("block", "text-xs", "mb-1");
+            if (sender !== "System") { senderSpan.textContent = sender; contentContainer.appendChild(senderSpan); }
+            const messageContent = document.createElement('span');
+            if (sender === "Bot" && message === "<span>Thinking...</span>") { messageContent.innerHTML = message; }
+            else if (message || (sender === "System")) { messageContent.textContent = message; messageContent.classList.add("whitespace-pre-wrap"); } // Show system messages
+            else if (imageSent && sender === "You") { messageContent.textContent = "[Image sent]"; messageContent.classList.add("text-gray-400", "italic"); }
+             contentContainer.appendChild(messageContent);
+             if (sender === "You" && imageSent && message) { const imgIndicator = document.createElement('span'); imgIndicator.textContent = " [+ Image]"; imgIndicator.classList.add("text-xs", "text-gray-400", "ml-1", "italic"); contentContainer.appendChild(imgIndicator); }
+            messageDiv.appendChild(contentContainer); chatBox.appendChild(messageDiv);
+        }
+        function removeElementById(elementId) { const element = document.getElementById(elementId); if (element) { element.remove(); } }
+        function scrollToBottom() { chatBox.scrollTop = chatBox.scrollHeight; }
+        function handleKeyDown(event) { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); } }
+
+        // --- Initialization (Unchanged) ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedApiKey = localStorage.getItem('openrouterApiKey');
+            if (savedApiKey) { apiKeyInput.value = savedApiKey; addMessageToChat("System", "API Key loaded.", "text-gray-500"); scrollToBottom(); }
+            apiKeyInput.addEventListener('change', (event) => {
+                 const key = event.target.value.trim();
+                 if(key) { localStorage.setItem('openrouterApiKey', key); addMessageToChat("System", "API Key saved.", "text-gray-500"); }
+                 else { localStorage.removeItem('openrouterApiKey'); addMessageToChat("System", "API Key removed.", "text-gray-500"); }
+                 scrollToBottom();
+            });
+            messageInput.focus();
+             if (modelSelect.options.length === 0) { addMessageToChat("System", "⚠️ No models found in HTML dropdown.", "text-yellow-400 font-semibold"); }
+        });
+    </script>
+
+</body>
+</html>
+
